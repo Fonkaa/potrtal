@@ -13,7 +13,7 @@ export default function Home() {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (!query.trim()) {
-      setError('Please enter your Full Name or Student ID')
+      setError('Please enter your Student ID')
       return
     }
     router.push(`/result?q=${encodeURIComponent(query.trim())}`)
@@ -38,7 +38,7 @@ export default function Home() {
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight">Exam Result & Rank Portal</h1>
           <p className="text-xs text-amber-400 font-medium mt-1 uppercase tracking-wider">Electronics and Communication Engineering Innovation Club</p>
-          <p className="text-sm text-slate-400 mt-3">Enter your student ID or full name below to lookup your performance evaluation.</p>
+          <p className="text-sm text-slate-400 mt-3">Enter your student ID below to lookup your performance evaluation.</p>
         </div>
 
         <form onSubmit={handleSearch} className="space-y-5">

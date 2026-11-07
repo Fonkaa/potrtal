@@ -41,13 +41,24 @@ export default function AdminDashboard() {
   // Search filter query state for Ranks tab
   const [searchFilter, setSearchFilter] = useState('')
 
+  // Search filter query state for Scores tab
+  const [scoreSearchFilter, setScoreSearchFilter] = useState('')
+
   // Local scores dictionary: { [id]: scoreValue }
   const [localScores, setLocalScores] = useState<{ [key: string]: string }>({})
   const [scoreMessage, setScoreMessage] = useState('')
   const [isSubmittingScores, setIsSubmittingScores] = useState(false)
 
-  // Inline editing tracker for individual rows
+  // Inline editing tracker for individual rows (Scores tab score editing)
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
+
+  // Inline editing tracker for student ID & Full Name in Scores tab
+  const [editingDetailsId, setEditingDetailsId] = useState<string | null>(null)
+  const [localStudentDetails, setLocalStudentDetails] = useState<{ [key: string]: { studentId: string; name: string } }>({})
+
+  // Quota generator state for settings tab
+  const [quotaInput, setQuotaInput] = useState('')
+  const [quotaMessage, setQuotaMessage] = useState('')
 
   const router = useRouter()
 
@@ -61,16 +72,19 @@ export default function AdminDashboard() {
       const resResults = await fetch('/api/admin/results')
       const dataResults = await resResults.json()
       
-      // GUARANTEE results is always an array to prevent runtime filter errors
       const safeResults = Array.isArray(dataResults) ? dataResults : []
       setResults(safeResults)
 
       const scoresMap: { [key: string]: string } = {}
+      const detailsMap: { [key: string]: { studentId: string; name: string } } = {}
+
       safeResults.forEach((r: any) => {
         scoresMap[r.id] = r.score !== undefined && r.score !== null ? r.score.toString() : ''
+        detailsMap[r.id] = { studentId: r.studentId || '', name: r.name || '' }
       })
 
       setLocalScores(scoresMap)
+      setLocalStudentDetails(detailsMap)
 
       const resSettings = await fetch('/api/admin/settings')
       const dataSettings = await resSettings.json()
@@ -83,7 +97,25 @@ export default function AdminDashboard() {
     }
   }
 
-  // DYNAMIC RANKING ENGINE & FILTERING FOR ID/NAME: ONLY includes students who have a non-null score submitted
+  // ALPHABETICALLY SORTED & FILTERED RESULTS FOR THE SCORES TAB
+  const sortedAndFilteredResultsForScores = useMemo(() => {
+    if (!Array.isArray(results)) return []
+    const sorted = [...results].sort((a, b) => {
+      const nameA = (a.name || '').toLowerCase()
+      const nameB = (b.name || '').toLowerCase()
+      return nameA.localeCompare(nameB)
+    })
+
+    if (!scoreSearchFilter.trim()) return sorted
+    const query = scoreSearchFilter.toLowerCase()
+    return sorted.filter(
+      (r: any) =>
+        (r.studentId && r.studentId.toLowerCase().includes(query)) ||
+        (r.name && r.name.toLowerCase().includes(query))
+    )
+  }, [results, scoreSearchFilter])
+
+  // DYNAMIC RANKING ENGINE & FILTERING FOR ID/NAME (Results & Ranks Tab)
   const rankedResults = useMemo(() => {
     if (!Array.isArray(results) || results.length === 0) return []
     
@@ -98,7 +130,6 @@ export default function AdminDashboard() {
       return { ...student, rank: currentRank }
     })
 
-    // Apply Name or ID Filter search query
     if (!searchFilter.trim()) return rankedAll
     const query = searchFilter.toLowerCase()
     return rankedAll.filter(
@@ -107,7 +138,8 @@ export default function AdminDashboard() {
         (r.name && r.name.toLowerCase().includes(query))
     )
   }, [results, searchFilter])
-const handleRegisterStudent = async (e: React.FormEvent) => {
+
+  const handleRegisterStudent = async (e: React.FormEvent) => {
     e.preventDefault()
     setMessage('')
     
@@ -138,6 +170,52 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
     setLocalScores(prev => ({ ...prev, [id]: val }))
   }
 
+  const handleDetailInputChange = (id: string, field: 'studentId' | 'name', val: string) => {
+    setLocalStudentDetails(prev => ({
+      ...prev,
+      [id]: {
+        studentId: field === 'studentId' ? val : (prev[id]?.studentId || ''),
+        name: field === 'name' ? val : (prev[id]?.name || '')
+      }
+    }))
+  }
+
+  const handleSaveStudentDetails = async (r: any) => {
+    const details = localStudentDetails[r.id]
+    if (!details || !details.studentId || !details.name) {
+      alert('Student ID and Name cannot be empty.')
+      return
+    }
+
+    const currentScoreVal = localScores[r.id] !== undefined ? localScores[r.id] : ''
+    const parsedScore = currentScoreVal.trim() === '' ? null : parseFloat(currentScoreVal)
+
+    try {
+      const res = await fetch('/api/admin/results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: r.id, 
+          studentId: details.studentId, 
+          name: details.name, 
+          score: parsedScore 
+        }),
+      })
+
+      if (res.ok) {
+        setEditingDetailsId(null)
+        fetchData()
+        alert('Student details updated successfully!')
+      } else {
+        const data = await res.json()
+        alert(data.error || 'Failed to update student details.')
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Error saving student details.')
+    }
+  }
+
   const handleBatchSubmitScores = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmittingScores(true)
@@ -154,10 +232,12 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
           return
         }
 
+        const details = localStudentDetails[r.id] || { studentId: r.studentId, name: r.name }
+
         await fetch('/api/admin/results', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: r.id, studentId: r.studentId, name: r.name, score: parsedScore }),
+          body: JSON.stringify({ id: r.id, studentId: details.studentId, name: details.name, score: parsedScore }),
         })
       }
 
@@ -194,7 +274,7 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
   const handleUpdateCutoff = async (e: React.FormEvent) => {
     e.preventDefault()
     const val = parseFloat(cutoff)
-    if (val < 0 || val > 30) {
+    if (isNaN(val) || val < 0 || val > 30) {
       alert('Cutoff score out of 30 must be between 0 and 30.')
       return
     }
@@ -204,6 +284,44 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
       body: JSON.stringify({ cutoff: val.toString() }),
     })
     alert('Passing cutoff score updated successfully!')
+  }
+
+  const handleGenerateCutoffByQuota = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setQuotaMessage('')
+    const quotaNum = parseInt(quotaInput, 10)
+
+    if (isNaN(quotaNum) || quotaNum <= 0) {
+      setQuotaMessage('Please enter a valid positive number for the student quota.')
+      return
+    }
+
+    const submittedScores = results
+      .filter(r => r.score !== undefined && r.score !== null)
+      .map(r => parseFloat(r.score))
+      .sort((a, b) => b - a)
+
+    if (submittedScores.length === 0) {
+      setQuotaMessage('No submitted student scores available to calculate quota cutoff.')
+      return
+    }
+
+    const targetIndex = Math.min(quotaNum, submittedScores.length) - 1
+    const suggestedCutoff = submittedScores[targetIndex]
+
+    setCutoff(suggestedCutoff.toString())
+
+    try {
+      await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cutoff: suggestedCutoff.toString() }),
+      })
+      setQuotaMessage(`Quota analyzed successfully! Suggested & updated cutoff score set to ${suggestedCutoff} (based on top ${quotaNum} student rank).`)
+    } catch (err) {
+      console.error(err)
+      setQuotaMessage('Calculated cutoff suggestion, but failed to save to server settings.')
+    }
   }
 
   const handleUpdateCredentials = async (e: React.FormEvent) => {
@@ -225,7 +343,7 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
   const topScorer = rankedResults.length > 0 ? rankedResults[0] : null
 
   return (
-    <div className="min-h-screen bg-[#070F1E] text-slate-100 flex flex-col md:flex-row pb-20 md:pb-0">
+    <div className="min-h-screen bg-[#070F1E] text-slate-100 flex flex-col md:flex-row pb-24 md:pb-0">
       
       {/* SIDEBAR NAVIGATION (Desktop) */}
       <aside className="hidden md:flex flex-col w-64 lg:w-72 bg-[#0B192C]/90 backdrop-blur-2xl border-r border-slate-800/80 p-6 sticky top-0 h-screen z-30">
@@ -239,7 +357,7 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
           </div>
         </div>
 
-        <nav className="flex-1 py-6 space-y-2">
+        <nav className="flex-1 py-6 space-y-2 overflow-y-auto">
           {[
             { id: 'overview', name: 'Dashboard Overview', icon: LayoutDashboard },
             { id: 'register', name: 'Register Students', icon: PlusCircle },
@@ -283,8 +401,8 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
         </div>
       </aside>
 
-      {/* MOBILE BOTTOM NAVIGATION DOCK */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0B192C]/95 backdrop-blur-2xl border-t border-slate-800 p-2 z-50 flex justify-around items-center">
+      {/* MOBILE BOTTOM NAVIGATION DOCK (WITH VISIBLE LOGOUT BUTTON) */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0B192C]/95 backdrop-blur-2xl border-t border-slate-800 p-2 z-50 flex justify-around items-center gap-1">
         {[
           { id: 'overview', name: 'Home', icon: LayoutDashboard },
           { id: 'register', name: 'Register', icon: PlusCircle },
@@ -302,16 +420,25 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
                 isActive ? 'text-amber-400 bg-slate-800/60' : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Icon size={18} />
-              <span className="text-[10px] mt-1 font-medium">{item.name}</span>
+              <Icon size={16} />
+              <span className="text-[9px] mt-1 font-medium">{item.name}</span>
               {item.id === 'scores' && pendingCount > 0 && (
-                <span className="absolute top-1 right-2 w-4 h-4 bg-amber-500 text-slate-950 font-bold text-[9px] rounded-full flex items-center justify-center">
+                <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-amber-500 text-slate-950 font-bold text-[8px] rounded-full flex items-center justify-center">
                   {pendingCount}
                 </span>
               )}
             </button>
           )
         })}
+        {/* Mobile Logout Button */}
+        <button
+          onClick={() => router.push('/admin/login')}
+          className="flex flex-col items-center p-2 rounded-xl text-rose-400 hover:bg-rose-500/10 transition-all"
+          title="Logout"
+        >
+          <LogOut size={16} />
+          <span className="text-[9px] mt-1 font-medium">Logout</span>
+        </button>
       </div>
 
       {/* MAIN CONTENT AREA */}
@@ -418,110 +545,184 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
           </div>
         )}
 
-        {/* TAB 3: ENTER SCORES */}
+        {/* TAB 3: ENTER SCORES (ALPHABETICALLY SORTED WITH SEARCH FILTER) */}
         {activeTab === 'scores' && (
-          <div className="bg-[#0B192C]/80 backdrop-blur-xl p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-2xl border border-slate-800 space-y-6">
+          <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-base md:text-lg font-bold text-white">Dynamic Score Entry (Out of 30)</h2>
-                <p className="text-xs text-slate-400">Leave blank to submit as null. Enter scores and submit to publish.</p>
+                <h2 className="text-base sm:text-lg md:text-xl font-black text-white">Dynamic Score Entry (Out of 30)</h2>
+                <p className="text-xs text-slate-400">Students listed alphabetically. Filter by name or Student ID below.</p>
               </div>
             </div>
 
-            {scoreMessage && (
-              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium flex items-center gap-2">
-                <CheckCircle2 size={16} className="shrink-0" /> {scoreMessage}
-              </div>
-            )}
+            {/* SEARCH FILTER BAR FOR SCORES TAB */}
+            <div className="relative">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input
+                type="text"
+                placeholder="Filter by Student ID or Full Name..."
+                value={scoreSearchFilter}
+                onChange={(e) => setScoreSearchFilter(e.target.value)}
+                className="w-full bg-[#0B192C]/80 border border-slate-800 rounded-2xl pl-10 pr-4 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+              />
+            </div>
 
-            <form onSubmit={handleBatchSubmitScores} className="space-y-6">
-              <div className="overflow-x-auto rounded-2xl border border-slate-800">
-                <table className="w-full text-left text-sm min-w-[500px]">
-                  <thead className="bg-[#070F1E] text-slate-400 uppercase text-xs tracking-wider border-b border-slate-800">
-                    <tr>
-                      <th className="p-3.5 sm:p-4">Student ID</th>
-                      <th className="p-3.5 sm:p-4">Full Name</th>
-                      <th className="p-3.5 sm:p-4">Score (/30)</th>
-                      <th className="p-3.5 sm:p-4 text-right">Edit Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {results.length > 0 ? (
-                      results.map((r) => {
-                        const currentScoreVal = localScores[r.id] !== undefined ? localScores[r.id] : ''
-                        const hasExistingScore = r.score !== undefined && r.score !== null
-                        const isEditing = !hasExistingScore || editingRowId === r.id
-
-                        return (
-                          <tr key={r.id} className="hover:bg-slate-800/30 transition-colors">
-                            <td className="p-3.5 sm:p-4 font-mono text-amber-400 text-xs sm:text-sm">{r.studentId}</td>
-                            <td className="p-3.5 sm:p-4 font-semibold text-white text-xs sm:text-sm">{r.name}</td>
-                            <td className="p-3.5 sm:p-4">
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="number"
-                                  step="any"
-                                  min="0"
-                                  max="30"
-                                  value={currentScoreVal}
-                                  disabled={!isEditing}
-                                  placeholder="Leave blank"
-                                  onChange={(e) => handleScoreInputChange(r.id, e.target.value)}
-                                  className={`w-28 bg-[#070F1E] border rounded-xl px-3 py-2 text-xs sm:text-sm text-white font-bold focus:ring-2 focus:ring-amber-400 ${
-                                    isEditing ? 'border-amber-400 ring-1 ring-amber-400' : 'border-slate-700 opacity-80'
-                                  }`}
-                                />
-                                <span className="text-xs text-slate-500">/ 30</span>
-                              </div>
-                            </td>
-                            <td className="p-3.5 sm:p-4 text-right">
-                              {hasExistingScore ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingRowId(editingRowId === r.id ? null : r.id)}
-                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ml-auto ${
-                                    editingRowId === r.id 
-                                      ? 'bg-emerald-600 text-white shadow-lg' 
-                                      : 'bg-slate-800 text-amber-400 border border-slate-700'
-                                  }`}
-                                >
-                                  {editingRowId === r.id ? <Check size={14} /> : <Edit3 size={14} />}
-                                  {editingRowId === r.id ? 'Lock' : 'Edit'}
-                                </button>
-                              ) : (
-                                <span className="text-xs text-amber-400 font-medium">Pending (Null)</span>
-                              )}
-                            </td>
-                          </tr>
-                        )
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={4} className="p-12 text-center text-slate-500 text-xs sm:text-sm">
-                          No students registered yet.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {results.length > 0 && (
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={isSubmittingScores}
-                    className="flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl font-bold text-xs sm:text-sm transition shadow-xl"
-                  >
-                    <Save size={16} /> {isSubmittingScores ? 'Submitting...' : 'Submit All Scores & Sync to Sheet'}
-                  </button>
+            <div className="bg-[#0B192C]/80 backdrop-blur-xl p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-2xl border border-slate-800 space-y-6">
+              {scoreMessage && (
+                <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium flex items-center gap-2">
+                  <CheckCircle2 size={16} className="shrink-0" /> {scoreMessage}
                 </div>
               )}
-            </form>
+
+              <form onSubmit={handleBatchSubmitScores} className="space-y-6">
+                <div className="overflow-x-auto rounded-2xl border border-slate-800">
+                  <table className="w-full text-left text-sm min-w-[700px]">
+                    <thead className="bg-[#070F1E] text-slate-400 uppercase text-xs tracking-wider border-b border-slate-800">
+                      <tr>
+                        <th className="p-3.5 sm:p-4">Student ID</th>
+                        <th className="p-3.5 sm:p-4">Full Name (A–Z)</th>
+                        <th className="p-3.5 sm:p-4">Score (/30)</th>
+                        <th className="p-3.5 sm:p-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {sortedAndFilteredResultsForScores.length > 0 ? (
+                        sortedAndFilteredResultsForScores.map((r) => {
+                          const currentScoreVal = localScores[r.id] !== undefined ? localScores[r.id] : ''
+                          const hasExistingScore = r.score !== undefined && r.score !== null
+                          const isEditingScore = !hasExistingScore || editingRowId === r.id
+                          const isEditingDetails = editingDetailsId === r.id
+                          const details = localStudentDetails[r.id] || { studentId: r.studentId, name: r.name }
+
+                          return (
+                            <tr key={r.id} className="hover:bg-slate-800/30 transition-colors">
+                              {/* Student ID Column */}
+                              <td className="p-3.5 sm:p-4">
+                                {isEditingDetails ? (
+                                  <input
+                                    type="text"
+                                    value={details.studentId}
+                                    onChange={(e) => handleDetailInputChange(r.id, 'studentId', e.target.value)}
+                                    className="w-full bg-[#070F1E] border border-amber-400 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                                  />
+                                ) : (
+                                  <span className="font-mono text-amber-400 text-xs sm:text-sm">{r.studentId}</span>
+                                )}
+                              </td>
+
+                              {/* Full Name Column */}
+                              <td className="p-3.5 sm:p-4">
+                                {isEditingDetails ? (
+                                  <input
+                                    type="text"
+                                    value={details.name}
+                                    onChange={(e) => handleDetailInputChange(r.id, 'name', e.target.value)}
+                                    className="w-full bg-[#070F1E] border border-amber-400 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold"
+                                  />
+                                ) : (
+                                  <span className="font-semibold text-white text-xs sm:text-sm">{r.name}</span>
+                                )}
+                              </td>
+
+                              {/* Score Column */}
+                              <td className="p-3.5 sm:p-4">
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    max="30"
+                                    value={currentScoreVal}
+                                    disabled={!isEditingScore}
+                                    placeholder="Result"
+                                    onChange={(e) => handleScoreInputChange(r.id, e.target.value)}
+                                    className={`w-28 bg-[#070F1E] border rounded-xl px-3 py-2 text-xs sm:text-sm text-white font-bold focus:ring-2 focus:ring-amber-400 ${
+                                      isEditingScore ? 'border-amber-400 ring-1 ring-amber-400' : 'border-slate-700 opacity-80'
+                                    }`}
+                                  />
+                                  <span className="text-xs text-slate-500">/ 30</span>
+                                </div>
+                              </td>
+
+                              {/* Action Column */}
+                              <td className="p-3.5 sm:p-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  {isEditingDetails ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveStudentDetails(r)}
+                                      className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1 shadow"
+                                      title="Save ID & Name"
+                                    >
+                                      <Save size={13} /> Save
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingDetailsId(r.id)}
+                                      className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 text-xs font-medium transition flex items-center gap-1"
+                                      title="Edit Student ID & Name"
+                                    >
+                                      <Edit3 size={13} /> Edit ID/Name
+                                    </button>
+                                  )}
+
+                                  {hasExistingScore && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingRowId(editingRowId === r.id ? null : r.id)}
+                                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+                                        editingRowId === r.id 
+                                          ? 'bg-emerald-600 text-white shadow-lg' 
+                                          : 'bg-slate-800 text-amber-400 border border-slate-700'
+                                      }`}
+                                    >
+                                      {editingRowId === r.id ? <Check size={13} /> : <Edit3 size={13} />}
+                                      {editingRowId === r.id ? 'Lock' : 'Score'}
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(r.id)}
+                                    className="p-2 rounded-xl bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition"
+                                    title="Delete Student Record"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="p-12 text-center text-slate-500 text-xs sm:text-sm">
+                            {scoreSearchFilter ? 'No matching student records found.' : 'No students registered yet.'}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {results.length > 0 && (
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isSubmittingScores}
+                      className="flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl font-bold text-xs sm:text-sm transition shadow-xl"
+                    >
+                      <Save size={16} /> {isSubmittingScores ? 'Submitting...' : 'Submit All Scores & Sync to Sheet'}
+                    </button>
+                  </div>
+                )}
+              </form>
+            </div>
           </div>
         )}
 
-        {/* TAB 4: ALL STUDENT RESULTS & DYNAMIC RANKS (WITH NAME & ID SEARCH FILTER BAR) */}
+        {/* TAB 4: ALL STUDENT RESULTS & DYNAMIC RANKS */}
         {activeTab === 'results' && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -545,7 +746,6 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
               </div>
             </div>
 
-            {/* SEARCH FILTER INPUT BAR FOR NAME & ID */}
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
               <input
@@ -557,7 +757,6 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
               />
             </div>
 
-            {/* Printable Sheet Container */}
             <div id="printable-sheet" className="bg-[#0B192C]/80 backdrop-blur-xl p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-2xl border border-slate-800 space-y-6">
               <div className="hidden print:block text-center mb-6">
                 <h1 className="text-xl font-bold text-black">Electronics and Communication Engineering Innovation Club (ECIC)</h1>
@@ -627,11 +826,10 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
           </div>
         )}
 
-        {/* TAB 5: SYSTEM SETTINGS (CUTOFF & CREDENTIALS) */}
+        {/* TAB 5: SYSTEM SETTINGS */}
         {activeTab === 'settings' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             
-            {/* Cutoff Card */}
             <div className="bg-[#0B192C]/80 backdrop-blur-xl p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-2xl border border-slate-800 space-y-6">
               <div className="flex items-center gap-3">
                 <div className="p-3 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
@@ -639,9 +837,10 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
                 </div>
                 <div>
                   <h2 className="text-base md:text-lg font-bold text-white">Passing Cutoff Benchmark</h2>
-                  <p className="text-xs text-slate-400">Configure passing mark out of 30</p>
+                  <p className="text-xs text-slate-400">Configure cutoff manually or generate via student quota</p>
                 </div>
               </div>
+
               <form onSubmit={handleUpdateCutoff} className="space-y-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Cutoff Score (Out of 30)</label>
@@ -659,9 +858,40 @@ const handleRegisterStudent = async (e: React.FormEvent) => {
                   Update Cutoff Benchmark
                 </button>
               </form>
+
+              <hr className="border-slate-800 my-4" />
+
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-1">Generate Cutoff by Club Quota</h3>
+                  <p className="text-xs text-slate-400">Enter the number of students the club wants to accept. The system will analyze scores and suggest the optimal cutoff point.</p>
+                </div>
+
+                {quotaMessage && (
+                  <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium">
+                    {quotaMessage}
+                  </div>
+                )}
+
+                <form onSubmit={handleGenerateCutoffByQuota} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Target Student Quota (Capacity)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 20"
+                      value={quotaInput}
+                      onChange={(e) => setQuotaInput(e.target.value)}
+                      className="w-full bg-[#070F1E] border border-slate-700 rounded-xl px-4 py-3 text-xs md:text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                  </div>
+                  <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs md:text-sm transition shadow-lg">
+                    Generate Cutoff from Quota
+                  </button>
+                </form>
+              </div>
             </div>
 
-            {/* Admin Credentials Card */}
             <div className="bg-[#0B192C]/80 backdrop-blur-xl p-6 md:p-8 rounded-2xl md:rounded-3xl shadow-2xl border border-slate-800 space-y-6">
               <div className="flex items-center gap-3">
                 <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
