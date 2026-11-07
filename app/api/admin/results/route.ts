@@ -2,9 +2,14 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 export async function GET() {
   try {
+    if (process.env.NEXT_PHASE === 'phase-production-build' || !process.env.DATABASE_URL) {
+      return NextResponse.json([], { status: 200 })
+    }
+
     const results = await prisma.result.findMany({
       orderBy: { createdAt: 'desc' },
     })
@@ -17,6 +22,10 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    if (process.env.NEXT_PHASE === 'phase-production-build' || !process.env.DATABASE_URL) {
+      return NextResponse.json({ error: 'Service initializing' }, { status: 503 })
+    }
+
     const body = await request.json()
     const { id, studentId, name, score } = body
 
@@ -29,7 +38,6 @@ export async function POST(request: Request) {
     let savedResult
 
     if (id) {
-      // If an explicit row ID is provided, update that specific record (used when editing existing entries)
       savedResult = await prisma.result.update({
         where: { id },
         data: {
@@ -40,13 +48,11 @@ export async function POST(request: Request) {
         },
       })
     } else {
-      // NEW REGISTRATION: Always create a completely fresh record. 
-      // This ensures that deleted students can be re-registered as fresh new entries.
       savedResult = await prisma.result.create({
         data: {
           studentId,
           name,
-          score: parsedScore, // Defaults to null for new registrations
+          score: parsedScore,
           rank: 0,
         },
       })
@@ -61,6 +67,10 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    if (process.env.NEXT_PHASE === 'phase-production-build' || !process.env.DATABASE_URL) {
+      return NextResponse.json({ error: 'Service initializing' }, { status: 503 })
+    }
+
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 

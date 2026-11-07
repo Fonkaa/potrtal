@@ -8,10 +8,18 @@ export const runtime = 'nodejs'
 
 export async function POST(request: Request) {
   try {
+    // Completely bypass database lookups during Vercel build/static analysis phase
+    if (process.env.NEXT_PHASE === 'phase-production-build' || !process.env.DATABASE_URL) {
+      return NextResponse.json({ error: 'Service initializing' }, { status: 503 })
+    }
+
     const { email, password } = await request.json()
 
-    // Safely query admin table with a fallback during build time
-    const admin = await prisma.admin.findUnique({ where: { email } }).catch(() => null)
+    if (!email || !password) {
+      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
+    }
+
+    const admin = await prisma.admin.findUnique({ where: { email } })
     
     if (!admin) {
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
