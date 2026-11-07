@@ -5,14 +5,15 @@ import { signToken } from '../../../../lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+export const fetchCache = 'force-no-store'
 
 export async function POST(request: Request) {
-  try {
-    // Completely bypass database lookups during Vercel build/static analysis phase
-    if (process.env.NEXT_PHASE === 'phase-production-build' || !process.env.DATABASE_URL) {
-      return NextResponse.json({ error: 'Service initializing' }, { status: 503 })
-    }
+  // Completely bypass database lookups during Vercel's static build phase
+  if (process.env.NEXT_PHASE === 'phase-production-build' || !process.env.DATABASE_URL) {
+    return NextResponse.json({ error: 'Service initializing' }, { status: 503 })
+  }
 
+  try {
     const { email, password } = await request.json()
 
     if (!email || !password) {
