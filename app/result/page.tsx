@@ -143,10 +143,10 @@ function StudentResultContent() {
               <Sparkles size={16} className="text-amber-400 shrink-0" /> Welcome to the ECIC Family!
             </p>
             <p>
-              The Electronics and Communication Innovation Club (ECIC) expresses sincere appreciation for your dedication. Following our internal selection process, we have updated our leadership and active member structure for this academic year based on leadership potential and academic involvement.
+              The Electronics and Communication Innovation Club (ECIC) is delighted to welcome you to our community of innovators and future technology leaders! Your dedication, academic involvement, and leadership potential make you a valuable addition to this year's active membership.
             </p>
             <p>
-              As we finalize our allocated departmental office space for innovation projects, weekly meetings, and student engagement activities, your presence will greatly enhance peer collaboration and technical development within the ECE department!
+ As we establish our departmental office and prepare for innovation projects, weekly meetings, and collaborative activities, your contribution will play an important role in shaping our community. Together, let's connect, collaborate, innovate, and turn great ideas into reality! 🚀💡
             </p>
           </div>
         </div>
