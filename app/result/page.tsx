@@ -37,11 +37,14 @@ function StudentResultContent() {
           setCutoff(parseFloat(settingsData.cutoff))
         }
 
-        // STRICT MATCH BY STUDENT ID ONLY
-        const foundRecord = allResults.find(
-          (r: any) => r.studentId && r.studentId.toLowerCase() === query.toLowerCase()
-        )
-
+        // // STRICT MATCH BY STUDENT ID ONLY
+        // const foundRecord = allResults.find(
+        //   (r: any) => r.studentId && r.studentId.toLowerCase() === query.toLowerCase()
+        // )
+// STRICT MATCH BY STUDENT ID WITH TRIM & LOWERCASE
+const foundRecord = allResults.find(
+  (r: any) => r.studentId && r.studentId.trim().toLowerCase() === query.trim().toLowerCase()
+)
         if (!foundRecord) {
           setRecordExists(false)
         } else {
